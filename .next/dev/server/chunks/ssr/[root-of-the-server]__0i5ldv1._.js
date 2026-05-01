@@ -104,75 +104,86 @@ __turbopack_context__.s([
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/axios/lib/axios.js [app-rsc] (ecmascript)");
 ;
-const tags = [
+const GAME_ID = '27471';
+const TAGS = [
     'hypixel',
     'skyblock'
 ];
-const GAME_ID = '27471';
+const MAX_PAGES = 20;
+const TARGET_COUNT = 20;
+const STREAM_CACHE_TTL = 5 * 60 * 1000;
+const TOKEN_BUFFER_MS = 60 * 1000;
+let tokenCache = null;
+let streamCache = null;
 async function getToken() {
-    const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].post(`https://id.twitch.tv/oauth2/token`, null, {
+    if (tokenCache && Date.now() < tokenCache.expiry) {
+        return tokenCache.value;
+    }
+    const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].post('https://id.twitch.tv/oauth2/token', null, {
         params: {
             client_id: process.env.CLIENT_ID,
             client_secret: process.env.CLIENT_SECRET,
             grant_type: 'client_credentials'
         }
     });
-    return res.data.access_token;
+    tokenCache = {
+        value: res.data.access_token,
+        expiry: Date.now() + res.data.expires_in * 1000 - TOKEN_BUFFER_MS
+    };
+    return tokenCache.value;
+}
+function normalizeThumbnail(url) {
+    return url.replace('{width}', '440').replace('{height}', '248');
+}
+function matchesTags(stream) {
+    const title = stream.title.toLowerCase();
+    return TAGS.every((tag)=>title.includes(tag));
 }
 async function GetStreams() {
-    try {
-        const at = await getToken();
-        const headers = {
-            Authorization: `Bearer ${at}`,
-            'Client-Id': process.env.CLIENT_ID
-        };
-        let filtered = [];
-        let cursor = null;
-        let pages = 0;
-        const MAX_PAGES = 10;
-        while(filtered.length < 20 && pages < MAX_PAGES){
-            const params = {
-                game_id: GAME_ID,
-                type: 'live',
-                first: 100
-            };
-            if (cursor) params.after = cursor;
-            const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].get(`https://api.twitch.tv/helix/streams`, {
-                headers,
-                params
-            });
-            const streams = res.data.data;
-            const pagination = res.data.pagination;
-            const matches = streams.filter((stream)=>{
-                const title = stream.title.toLowerCase();
-                return tags.every((tag)=>title.includes(tag));
-            });
-            filtered = [
-                ...filtered,
-                ...matches
-            ];
-            // Normalize thumbnail URLs
-            filtered = filtered.map((s)=>({
-                    ...s,
-                    thumbnail_url: s.thumbnail_url.replace('{width}', '440').replace('{height}', '248')
-                }));
-            cursor = pagination?.cursor ?? null;
-            pages++;
-            if (!cursor || streams.length === 0) break;
-        }
-        // Deduplicate by stream id
-        filtered = [
-            ...new Map(filtered.map((s)=>[
-                    s.id,
-                    s
-                ])).values()
-        ];
-        console.log(filtered);
-        return filtered;
-    } catch (err) {
-        console.error(err);
-        return [];
+    if (streamCache && Date.now() < streamCache.expiry) {
+        return streamCache.data;
     }
+    const token = await getToken();
+    const headers = {
+        Authorization: `Bearer ${token}`,
+        'Client-Id': process.env.CLIENT_ID
+    };
+    const seen = new Set();
+    const filtered = [];
+    let cursor = null;
+    let pages = 0;
+    while(filtered.length < TARGET_COUNT && pages < MAX_PAGES){
+        const params = {
+            game_id: GAME_ID,
+            type: 'live',
+            first: 100
+        };
+        if (cursor) params.after = cursor;
+        const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].get('https://api.twitch.tv/helix/streams', {
+            headers,
+            params
+        });
+        const streams = res.data.data;
+        const pagination = res.data.pagination;
+        for (const stream of streams){
+            if (!seen.has(stream.id) && matchesTags(stream)) {
+                seen.add(stream.id);
+                filtered.push({
+                    ...stream,
+                    thumbnail_url: normalizeThumbnail(stream.thumbnail_url)
+                });
+            }
+        }
+        cursor = pagination?.cursor ?? null;
+        pages++;
+        if (!cursor || streams.length === 0) break;
+    }
+    filtered.sort((a, b)=>b.viewer_count - a.viewer_count);
+    streamCache = {
+        data: filtered,
+        expiry: Date.now() + STREAM_CACHE_TTL
+    };
+    return filtered;
 }
 }),
 "[project]/components/streamComponent.tsx [app-rsc] (ecmascript)", ((__turbopack_context__) => {
@@ -399,7 +410,7 @@ async function Page() {
                 className: "w-full border-t border-zinc-200 dark:border-zinc-800 mt-10",
                 children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                     className: "max-w-7xl mx-auto px-6 py-4 text-center text-xs text-zinc-400 dark:text-zinc-600",
-                    children: "Refreshes every 5 minutes · Powered by Twitch API"
+                    children: "Refreshes every 5 minutes"
                 }, void 0, false, {
                     fileName: "[project]/app/streams/page.tsx",
                     lineNumber: 44,

@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["file:///D:/projects/SkyblockStreams/skyblockstreams/app/page.tsx"],"sourcesContent":["import Image from \"next/image\";\n\nexport default function Home() {\n  return (\n    <div className=\"flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black\">\n      <main className=\"flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start\">\n        Skyblok streams\n        <a href={'/streams'}>Look at streams</a>\n      </main>\n    </div>\n  );\n}\n"],"names":["Home","className","href"],"mappings":";;;;;;AAEe,SAASA;IACtB,qBACE,8OAAC;QAAIC,WAAU;kBACb,cAAA,8OAAC;YAAKA,WAAU;;gBAAuH;8BAErI,8OAAC;oBAAEC,MAAM;8BAAY;;;;;;;;;;;;;;;;;AAI7B"}}]
+}
