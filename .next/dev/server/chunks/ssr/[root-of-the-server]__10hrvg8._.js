@@ -118,7 +118,7 @@ module.exports = mod;
 
 __turbopack_context__.s([
     "default",
-    ()=>GetStreams
+    ()=>getStreams
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/axios/lib/axios.js [app-rsc] (ecmascript)");
 ;
@@ -129,79 +129,109 @@ const TAGS = [
 ];
 const MAX_PAGES = 30;
 const TARGET_COUNT = 20;
-const STREAM_CACHE_TTL = 5 * 60 * 1000;
+const STREAM_CACHE_TTL = 1 * 60 * 1000;
 const TOKEN_BUFFER_MS = 60 * 1000;
 let tokenCache = null;
 let streamCache = null;
+let refreshTimer = null;
+let isFetching = false;
 async function getToken() {
     if (tokenCache && Date.now() < tokenCache.expiry) {
         return tokenCache.value;
     }
-    const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].post('https://id.twitch.tv/oauth2/token', null, {
-        params: {
-            client_id: process.env.CLIENT_ID,
-            client_secret: process.env.CLIENT_SECRET,
-            grant_type: 'client_credentials'
-        }
-    });
-    tokenCache = {
-        value: res.data.access_token,
-        expiry: Date.now() + res.data.expires_in * 1000 - TOKEN_BUFFER_MS
-    };
-    return tokenCache.value;
+    try {
+        const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].post('https://id.twitch.tv/oauth2/token', null, {
+            params: {
+                client_id: process.env.CLIENT_ID,
+                client_secret: process.env.CLIENT_SECRET,
+                grant_type: 'client_credentials'
+            }
+        });
+        tokenCache = {
+            value: res.data.access_token,
+            expiry: Date.now() + res.data.expires_in * 1000 - TOKEN_BUFFER_MS
+        };
+        return tokenCache.value;
+    } catch (err) {
+        throw new Error(`Failed to fetch Twitch token: ${err}`);
+    }
 }
 function normalizeThumbnail(url) {
     return url.replace('{width}', '440').replace('{height}', '248');
 }
 function matchesTags(stream) {
     const title = stream.title.toLowerCase();
-    return TAGS.every((tag)=>title.includes(tag));
+    const streamTags = stream.tags?.map((t)=>t.toLowerCase()) ?? [];
+    return TAGS.every((tag)=>title.includes(tag) || streamTags.includes(tag));
 }
-async function GetStreams() {
+function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(()=>{
+        fetchAndCacheStreams().catch(console.error);
+    }, STREAM_CACHE_TTL);
+    if (refreshTimer.unref) refreshTimer.unref();
+}
+async function fetchAndCacheStreams() {
+    if (isFetching) {
+        return streamCache?.data ?? [];
+    }
+    isFetching = true;
+    try {
+        const token = await getToken();
+        const headers = {
+            Authorization: `Bearer ${token}`,
+            'Client-Id': process.env.CLIENT_ID
+        };
+        const seen = new Set();
+        const filtered = [];
+        let cursor = null;
+        let pages = 0;
+        while(filtered.length < TARGET_COUNT && pages < MAX_PAGES){
+            const params = {
+                game_id: GAME_ID,
+                type: 'live',
+                first: 100
+            };
+            if (cursor) params.after = cursor;
+            const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].get('https://api.twitch.tv/helix/streams', {
+                headers,
+                params
+            });
+            const streams = res.data.data;
+            const pagination = res.data.pagination;
+            for (const stream of streams){
+                if (filtered.length >= TARGET_COUNT) break;
+                if (!seen.has(stream.user_id) && matchesTags(stream)) {
+                    seen.add(stream.user_id);
+                    filtered.push({
+                        ...stream,
+                        thumbnail_url: normalizeThumbnail(stream.thumbnail_url)
+                    });
+                }
+            }
+            cursor = pagination?.cursor ?? null;
+            pages++;
+            if (!cursor || streams.length === 0) break;
+        }
+        filtered.sort((a, b)=>b.viewer_count - a.viewer_count);
+        streamCache = {
+            data: filtered,
+            expiry: Date.now() + STREAM_CACHE_TTL
+        };
+        scheduleRefresh();
+        return filtered;
+    } catch (err) {
+        console.error('Failed to fetch streams:', err);
+        return streamCache?.data ?? [];
+    } finally{
+        isFetching = false;
+    }
+}
+async function getStreams() {
     if (streamCache && Date.now() < streamCache.expiry) {
         return streamCache.data;
     }
-    const token = await getToken();
-    const headers = {
-        Authorization: `Bearer ${token}`,
-        'Client-Id': process.env.CLIENT_ID
-    };
-    const seen = new Set();
-    const filtered = [];
-    let cursor = null;
-    let pages = 0;
-    while(filtered.length < TARGET_COUNT && pages < MAX_PAGES){
-        const params = {
-            game_id: GAME_ID,
-            type: 'live',
-            first: 100
-        };
-        if (cursor) params.after = cursor;
-        const res = await __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$axios$2f$lib$2f$axios$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"].get('https://api.twitch.tv/helix/streams', {
-            headers,
-            params
-        });
-        const streams = res.data.data;
-        const pagination = res.data.pagination;
-        for (const stream of streams){
-            if (!seen.has(stream.id) && matchesTags(stream)) {
-                seen.add(stream.id);
-                filtered.push({
-                    ...stream,
-                    thumbnail_url: normalizeThumbnail(stream.thumbnail_url)
-                });
-            }
-        }
-        cursor = pagination?.cursor ?? null;
-        pages++;
-        if (!cursor || streams.length === 0) break;
-    }
-    filtered.sort((a, b)=>b.viewer_count - a.viewer_count);
-    streamCache = {
-        data: filtered,
-        expiry: Date.now() + STREAM_CACHE_TTL
-    };
-    return filtered;
+    return fetchAndCacheStreams();
 }
 }),
 "[project]/app/streams/page.tsx [app-rsc] (ecmascript)", ((__turbopack_context__) => {
@@ -209,25 +239,21 @@ async function GetStreams() {
 
 __turbopack_context__.s([
     "default",
-    ()=>Page
+    ()=>Page,
+    "revalidate",
+    ()=>revalidate
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/dist/server/route-modules/app-page/vendored/rsc/react-jsx-dev-runtime.js [app-rsc] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$components$2f$streamComponent$2e$tsx__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/components/streamComponent.tsx [app-rsc] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$cache$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/cache.js [app-rsc] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$streams$2e$tsx__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/streams.tsx [app-rsc] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/image.js [app-rsc] (ecmascript)");
 ;
 ;
 ;
 ;
-;
-const getCachedStreams = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$cache$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["unstable_cache"])(async ()=>(0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$streams$2e$tsx__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"])(), [
-    'twitch-streams'
-], {
-    revalidate: 300
-});
+const revalidate = 300;
 async function Page() {
-    const streams = await getCachedStreams();
+    const streams = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$streams$2e$tsx__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["default"])();
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
         className: "min-h-screen font-sans relative",
         children: [
@@ -242,20 +268,20 @@ async function Page() {
                         priority: true
                     }, void 0, false, {
                         fileName: "[project]/app/streams/page.tsx",
-                        lineNumber: 19,
+                        lineNumber: 13,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                         className: "absolute inset-0 bg-black/50"
                     }, void 0, false, {
                         fileName: "[project]/app/streams/page.tsx",
-                        lineNumber: 27,
+                        lineNumber: 20,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/streams/page.tsx",
-                lineNumber: 18,
+                lineNumber: 12,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("header", {
@@ -265,7 +291,7 @@ async function Page() {
                         className: "absolute inset-0 bg-white/10 dark:bg-zinc-900/40 backdrop-blur-md border-b border-white/20 dark:border-zinc-800"
                     }, void 0, false, {
                         fileName: "[project]/app/streams/page.tsx",
-                        lineNumber: 31,
+                        lineNumber: 23,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -286,25 +312,25 @@ async function Page() {
                                                     d: "M11.64 5.93h1.43v4.28h-1.43m3.93-4.28H17v4.28h-1.43M7 2L3.43 5.57v12.86h4.28V22l3.58-3.57h2.85L20.57 12V2m-1.43 9.29l-2.85 2.85h-2.86l-2.5 2.5v-2.5H7.71V3.43h11.43z"
                                                 }, void 0, false, {
                                                     fileName: "[project]/app/streams/page.tsx",
-                                                    lineNumber: 36,
+                                                    lineNumber: 28,
                                                     columnNumber: 17
                                                 }, this)
                                             }, void 0, false, {
                                                 fileName: "[project]/app/streams/page.tsx",
-                                                lineNumber: 35,
+                                                lineNumber: 27,
                                                 columnNumber: 15
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
                                                 className: "absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-zinc-900"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/streams/page.tsx",
-                                                lineNumber: 38,
+                                                lineNumber: 30,
                                                 columnNumber: 15
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/streams/page.tsx",
-                                        lineNumber: 34,
+                                        lineNumber: 26,
                                         columnNumber: 13
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -314,7 +340,7 @@ async function Page() {
                                                 children: "Hypixel SkyBlock"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/streams/page.tsx",
-                                                lineNumber: 41,
+                                                lineNumber: 33,
                                                 columnNumber: 15
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -322,19 +348,19 @@ async function Page() {
                                                 children: "Live on Twitch"
                                             }, void 0, false, {
                                                 fileName: "[project]/app/streams/page.tsx",
-                                                lineNumber: 44,
+                                                lineNumber: 36,
                                                 columnNumber: 15
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/app/streams/page.tsx",
-                                        lineNumber: 40,
+                                        lineNumber: 32,
                                         columnNumber: 13
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/app/streams/page.tsx",
-                                lineNumber: 33,
+                                lineNumber: 25,
                                 columnNumber: 11
                             }, this),
                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -346,7 +372,7 @@ async function Page() {
                                             className: "w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"
                                         }, void 0, false, {
                                             fileName: "[project]/app/streams/page.tsx",
-                                            lineNumber: 49,
+                                            lineNumber: 41,
                                             columnNumber: 15
                                         }, this),
                                         streams.length,
@@ -354,24 +380,24 @@ async function Page() {
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/app/streams/page.tsx",
-                                    lineNumber: 48,
+                                    lineNumber: 40,
                                     columnNumber: 13
                                 }, this)
                             }, void 0, false, {
                                 fileName: "[project]/app/streams/page.tsx",
-                                lineNumber: 47,
+                                lineNumber: 39,
                                 columnNumber: 11
                             }, this)
                         ]
                     }, void 0, true, {
                         fileName: "[project]/app/streams/page.tsx",
-                        lineNumber: 32,
+                        lineNumber: 24,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/app/streams/page.tsx",
-                lineNumber: 30,
+                lineNumber: 22,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("main", {
@@ -384,7 +410,7 @@ async function Page() {
                             children: "😴"
                         }, void 0, false, {
                             fileName: "[project]/app/streams/page.tsx",
-                            lineNumber: 59,
+                            lineNumber: 50,
                             columnNumber: 13
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -392,7 +418,7 @@ async function Page() {
                             children: "No streams live right now"
                         }, void 0, false, {
                             fileName: "[project]/app/streams/page.tsx",
-                            lineNumber: 60,
+                            lineNumber: 51,
                             columnNumber: 13
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -400,13 +426,13 @@ async function Page() {
                             children: "Check back later"
                         }, void 0, false, {
                             fileName: "[project]/app/streams/page.tsx",
-                            lineNumber: 61,
+                            lineNumber: 52,
                             columnNumber: 13
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/app/streams/page.tsx",
-                    lineNumber: 58,
+                    lineNumber: 49,
                     columnNumber: 11
                 }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                     className: "flex flex-wrap w-full",
@@ -415,19 +441,19 @@ async function Page() {
                             thumbnail: stream.thumbnail_url,
                             username: stream.user_name,
                             viewer_count: stream.viewer_count
-                        }, stream.id, false, {
+                        }, stream.user_id, false, {
                             fileName: "[project]/app/streams/page.tsx",
-                            lineNumber: 66,
+                            lineNumber: 57,
                             columnNumber: 15
                         }, this))
                 }, void 0, false, {
                     fileName: "[project]/app/streams/page.tsx",
-                    lineNumber: 64,
+                    lineNumber: 55,
                     columnNumber: 11
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/app/streams/page.tsx",
-                lineNumber: 56,
+                lineNumber: 47,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$rsc$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["jsxDEV"])("footer", {
@@ -437,18 +463,18 @@ async function Page() {
                     children: "Refreshes every 5 minutes"
                 }, void 0, false, {
                     fileName: "[project]/app/streams/page.tsx",
-                    lineNumber: 79,
+                    lineNumber: 69,
                     columnNumber: 9
                 }, this)
             }, void 0, false, {
                 fileName: "[project]/app/streams/page.tsx",
-                lineNumber: 78,
+                lineNumber: 68,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/app/streams/page.tsx",
-        lineNumber: 15,
+        lineNumber: 11,
         columnNumber: 5
     }, this);
 }

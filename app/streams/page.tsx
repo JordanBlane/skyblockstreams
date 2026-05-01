@@ -1,20 +1,15 @@
 import StreamComponent from '@/components/streamComponent'
-import { unstable_cache } from 'next/cache';
+import AutoRefresh from '@/components/autorefresh';
 import GetStreams from '@/lib/streams';
 import Image from 'next/image';
 
-const getCachedStreams = unstable_cache(
-  async () => GetStreams(),
-  ['twitch-streams'],
-  { revalidate: 300 }
-);
+export const revalidate = 300;
 
 export default async function Page() {
-  const streams = await getCachedStreams();
+  const streams = await GetStreams();
   return (
     <div className="min-h-screen font-sans relative">
-
-      {/* Background Image */}
+      <AutoRefresh />
       <div className="fixed inset-0 -z-10">
         <Image
           src="/bg2.png"
@@ -23,10 +18,8 @@ export default async function Page() {
           className="object-cover"
           priority
         />
-        {/* Dark overlay for readability */}
         <div className="absolute inset-0 bg-black/50" />
       </div>
-
       <header className="w-full sticky top-0 z-10">
         <div className="absolute inset-0 bg-white/10 dark:bg-zinc-900/40 backdrop-blur-md border-b border-white/20 dark:border-zinc-800" />
         <div className="relative max-w-7xl mx-auto px-6 py-5 flex items-center gap-4">
@@ -52,7 +45,6 @@ export default async function Page() {
           </div>
         </div>
       </header>
-
       <main className="max-w-7xl mx-auto px-6 py-10">
         {streams.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 gap-4 text-center">
@@ -62,9 +54,9 @@ export default async function Page() {
           </div>
         ) : (
           <div className="flex flex-wrap w-full">
-            {streams.map((stream: any) => (
+            {streams.map((stream) => (
               <StreamComponent
-                key={stream.id}
+                key={stream.user_id}
                 title={stream.title}
                 thumbnail={stream.thumbnail_url}
                 username={stream.user_name}
@@ -74,7 +66,6 @@ export default async function Page() {
           </div>
         )}
       </main>
-
       <footer className="w-full border-t border-white/20 mt-10">
         <div className="max-w-7xl mx-auto px-6 py-4 text-center text-xs text-zinc-400">
           Refreshes every 5 minutes
