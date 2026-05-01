@@ -59,6 +59,8 @@ export default async function GetStreams() {
     // Deduplicate by stream id
     filtered = [...new Map(filtered.map((s) => [s.id, s])).values()];
 
+    filtered.sort((a, b) => b.viewer_count - a.viewer_count);
+
     console.log(filtered)
     return filtered;
   } catch (err) {

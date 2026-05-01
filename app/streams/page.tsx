@@ -42,7 +42,7 @@ export default async function Page() {
 
       <footer className="w-full border-t border-zinc-200 dark:border-zinc-800 mt-10">
         <div className="max-w-7xl mx-auto px-6 py-4 text-center text-xs text-zinc-400 dark:text-zinc-600">
-          Refreshes every 5 minutes · Powered by Twitch API
+          Refreshes every 5 minutes
         </div>
       </footer>
     </div>
