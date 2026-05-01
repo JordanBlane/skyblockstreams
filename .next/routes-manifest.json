@@ -42,10 +42,10 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
-      "page": "/api/hash",
-      "regex": "^/api/hash(?:/)?$",
+      "page": "/api/streams/hash",
+      "regex": "^/api/streams/hash(?:/)?$",
       "routeKeys": {},
-      "namedRegex": "^/api/hash(?:/)?$"
+      "namedRegex": "^/api/streams/hash(?:/)?$"
     },
     {
       "page": "/streams",

@@ -58,7 +58,7 @@ export default function StreamComponent(props: any) {
         <p className="text-xs text-zinc-500 dark:text-zinc-200 truncate mt-0.5">
           {props.title}
         </p>
-        {props.viewer_count && (
+        {props.viewer_count != null && (
           <p className="text-xs text-zinc-400 dark:text-zinc-400 mt-1">
             👁 {props.viewer_count.toLocaleString()} viewers
           </p>
