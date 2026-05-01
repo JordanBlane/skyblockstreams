@@ -60,8 +60,6 @@ export default async function GetStreams() {
     filtered = [...new Map(filtered.map((s) => [s.id, s])).values()];
 
     filtered.sort((a, b) => b.viewer_count - a.viewer_count);
-
-    console.log(filtered)
     return filtered;
   } catch (err) {
     console.error(err);
